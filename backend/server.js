@@ -202,6 +202,58 @@ app.get("/admin/pending-authors", verifyToken, isAdmin, (req, res) => {
   );
 });
 
+app.get("/admin/stats", verifyToken, isAdmin, (req, res) => {
+  const sql = `
+    SELECT
+      (SELECT COUNT(*) FROM books) AS totalBooks,
+      (SELECT COUNT(*) FROM users WHERE role='AUTHOR') AS totalAuthors,
+      (SELECT COUNT(*) FROM users WHERE role='USER') AS totalUsers,
+      (SELECT COUNT(*) FROM users WHERE role='AUTHOR' AND status='PENDING') AS pendingAuthors
+  `;
+
+  db.query(sql, (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(results[0]);
+  });
+});
+
+app.get("/admin/activity", verifyToken, isAdmin, (req, res) => {
+  const sql = `
+    SELECT title, detail
+    FROM (
+      SELECT
+        'New book added' AS title,
+        CONCAT(title, ' by ', author) AS detail,
+        id AS sortId
+      FROM books
+
+      UNION ALL
+
+      SELECT
+        'Author approved' AS title,
+        CONCAT(name, ' · ', email) AS detail,
+        id AS sortId
+      FROM users
+      WHERE role='AUTHOR' AND status='ACTIVE'
+
+      UNION ALL
+
+      SELECT
+        'New user signup' AS title,
+        CONCAT(name, ' · ', email) AS detail,
+        id AS sortId
+      FROM users
+      WHERE role='USER'
+    ) AS activity
+    ORDER BY sortId DESC
+    LIMIT 8
+  `;
+
+  db.query(sql, (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(results);
+  });
+});
 // ✅ Author's own books (and admin can also use it if needed)
 app.get("/my-books", verifyToken, (req, res) => {
   // Only AUTHOR (ACTIVE) or ADMIN can access
@@ -238,8 +290,26 @@ app.get("/my-books", verifyToken, (req, res) => {
 // ------------------------
 
 // GET all books (users can see image_url)
+// GET all books (with optional author & genre filters)
 app.get("/books", (req, res) => {
-  db.query("SELECT * FROM books", (err, results) => {
+  const { author, genre } = req.query;
+
+  let sql = "SELECT * FROM books WHERE 1=1";
+  const params = [];
+
+  if (author) {
+    sql += " AND author LIKE ?";
+    params.push(`%${author}%`);
+  }
+
+  if (genre) {
+    sql += " AND genre LIKE ?";
+    params.push(`%${genre}%`);
+  }
+
+  sql += " ORDER BY id DESC";
+
+  db.query(sql, params, (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(results);
   });
